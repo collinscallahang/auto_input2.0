@@ -12,4 +12,5 @@ build/
 dist/
 logs/
 simulation_output/
+real_test_output/
 *.spec

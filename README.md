@@ -79,6 +79,14 @@ python -m unittest discover -s tests
 python scripts\simulate_recorded_sample.py "D:\codex\auto_input2.0\input\样本 - F4.xlsx"
 ```
 
+用真实货拉拉网页做单行 smoke test：
+
+```powershell
+python scripts\run_real_sample_smoke.py "D:\codex\auto_input2.0\input\样本 - F4.xlsx" --row 3 --vehicles 1
+```
+
+脚本会打开货拉拉同城下单页，人工登录并确认后，自动填写第 3 行地址，读取 `总里程`，并只测试第一个匹配车型列。结果会写入 `real_test_output` 下的新 Excel 副本。
+
 当前自动化测试覆盖：
 
 - 必需字段不依赖固定列位置。

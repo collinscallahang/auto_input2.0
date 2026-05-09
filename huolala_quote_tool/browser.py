@@ -14,6 +14,8 @@ ORDER_URL = "https://bfe-epc-web-v.huolala.cn/#/order-center/same-city?from=menu
 KNOWN_VEHICLE_REQUIREMENTS = (
     "厢式货车",
     "飞翼车",
+    "平板货车",
+    "高栏货车",
     "平板车",
     "高栏车",
     "冷藏车",
@@ -96,6 +98,7 @@ class HuolalaClient:
         self.log("正在打开货拉拉同城下单页")
         self.page.goto(ORDER_URL, wait_until="domcontentloaded", timeout=self.timeout_ms)
         self.page.wait_for_load_state("networkidle", timeout=self.timeout_ms)
+        self._wait_for_order_form()
 
     def stop(self) -> None:
         try:
@@ -116,10 +119,11 @@ class HuolalaClient:
             self.log("地址与上一行相同，复用当前页面地址")
             return False
 
-        self.log("填写发货地址")
-        self._fill_input_by_keywords(["发货地址", "发货地", "发货", "起点", "提货", "装货"], origin, fallback_index=0)
-        self.log("填写到货地址")
-        self._fill_input_by_keywords(["到货地址", "收货地址", "到货", "目的地", "终点", "卸货"], destination, fallback_index=1)
+        if not self._fill_route_table_addresses(origin, destination):
+            self.log("填写发货地址")
+            self._fill_input_by_keywords(["发货地址", "发货地", "发货", "起点", "提货", "装货"], origin, fallback_index=0)
+            self.log("填写到货地址")
+            self._fill_input_by_keywords(["到货地址", "收货地址", "到货", "目的地", "终点", "卸货"], destination, fallback_index=1)
         self._last_origin = origin
         self._last_destination = destination
         self._wait_for_quote_refresh()
@@ -127,8 +131,7 @@ class HuolalaClient:
 
     def read_distance(self) -> float:
         self._require_page()
-        body_text = self.page.locator("body").inner_text(timeout=self.timeout_ms)
-        return parse_total_distance(body_text)
+        return self._wait_for_page_value(parse_total_distance, "总里程", accept=lambda value: value > 0)
 
     def quote_vehicle(self, rule: VehicleRule) -> float:
         self._require_page()
@@ -136,8 +139,7 @@ class HuolalaClient:
         self._select_car_length(rule.car_length)
         self._set_vehicle_requirements(rule.vehicle_requirements)
         self._wait_for_quote_refresh()
-        body_text = self.page.locator("body").inner_text(timeout=self.timeout_ms)
-        return parse_fixed_price(body_text)
+        return self._wait_for_page_value(parse_fixed_price, "运费一口价")
 
     def _require_page(self) -> None:
         if self.page is None:
@@ -155,6 +157,100 @@ class HuolalaClient:
         locator.type(value, delay=20, timeout=10000)
         self.page.keyboard.press("Enter")
         self._click_first_suggestion()
+
+    def _fill_route_table_addresses(self, origin: str, destination: str) -> bool:
+        address_boxes = self._wait_for_route_address_textareas()
+        if len(address_boxes) < 2:
+            return False
+
+        self.log("按货运路线表填写发货地址")
+        self._fill_route_row(address_boxes[0], 0, origin)
+        self.log("按货运路线表填写到货地址")
+        self._fill_route_row(address_boxes[1], 1, destination)
+        return True
+
+    def _route_address_textareas(self) -> list:
+        textareas = self.page.locator("textarea")
+        boxes = []
+        try:
+            count = textareas.count()
+        except Exception:
+            return boxes
+
+        for index in range(count):
+            candidate = textareas.nth(index)
+            try:
+                if not candidate.is_visible(timeout=300) or not candidate.is_enabled(timeout=300):
+                    continue
+                element_id = candidate.get_attribute("id") or ""
+                placeholder = candidate.get_attribute("placeholder") or ""
+                if "contactsName" in element_id or "contactsPhoneNo" in element_id:
+                    continue
+                context = candidate.evaluate(
+                    """(el) => {
+                        const parts = [el.getAttribute('placeholder') || ''];
+                        let node = el;
+                        for (let i = 0; i < 4 && node; i += 1) {
+                            if (node.innerText) parts.push(node.innerText.slice(0, 260));
+                            node = node.parentElement;
+                        }
+                        return parts.join(' ');
+                    }"""
+                )
+            except Exception:
+                continue
+            if "地址识别" in context and "请输入" in placeholder:
+                boxes.append(candidate)
+        return boxes
+
+    def _wait_for_route_address_textareas(self) -> list:
+        deadline = time.monotonic() + self.timeout_ms / 1000
+        boxes = []
+        while time.monotonic() < deadline:
+            try:
+                self.page.get_by_text("地址识别", exact=True).first.wait_for(state="visible", timeout=1000)
+            except Exception:
+                pass
+            boxes = self._route_address_textareas()
+            if len(boxes) >= 2:
+                return boxes
+            time.sleep(0.5)
+        return boxes
+
+    def _fill_route_row(self, address_box, recognizer_index: int, address: str) -> None:
+        recognizer = self.page.get_by_text("地址识别", exact=True).nth(recognizer_index)
+        if recognizer.count():
+            recognizer.click(timeout=5000)
+            if self._fill_address_recognition_modal(address):
+                self._wait_for_quote_refresh()
+                return
+
+        address_box.click(timeout=5000)
+        address_box.fill("", timeout=5000)
+        address_box.fill(address, timeout=10000)
+
+    def _fill_address_recognition_modal(self, address: str) -> bool:
+        dialog = self.page.locator("[role='dialog']").last
+        try:
+            dialog.wait_for(state="visible", timeout=3000)
+        except Exception:
+            return False
+
+        textarea = dialog.locator("textarea").first
+        textarea.fill("", timeout=5000)
+        textarea.fill(address, timeout=10000)
+
+        try:
+            button = dialog.get_by_role("button", name=re.compile(r"确\s*(认|定)")).last
+            button.click(timeout=5000)
+        except Exception:
+            dialog.get_by_text(re.compile(r"确\s*(认|定)")).last.click(timeout=5000)
+
+        try:
+            dialog.wait_for(state="hidden", timeout=10000)
+        except Exception:
+            pass
+        return True
 
     def _find_input_by_keywords(self, keywords: Iterable[str]):
         keyword_patterns = [re.compile(re.escape(keyword), re.IGNORECASE) for keyword in keywords]
@@ -239,32 +335,49 @@ class HuolalaClient:
                 continue
 
     def _select_car_length(self, car_length: str) -> None:
+        pattern = re.compile(rf"^{re.escape(car_length)}$")
+        try:
+            radio = self.page.get_by_label(pattern).first
+            if radio.count():
+                try:
+                    radio.check(timeout=3000)
+                except Exception:
+                    radio.click(timeout=3000)
+                self._wait_for_quote_refresh()
+                return
+        except Exception:
+            pass
+
         if self._click_text(car_length, exact=True):
+            self._wait_for_quote_refresh()
             return
         for label in ("车长", "车型", "选择车型"):
             if self._click_text(label, exact=False):
                 time.sleep(0.4)
                 if self._click_text(car_length, exact=True) or self._click_text(car_length, exact=False):
+                    self._wait_for_quote_refresh()
                     return
         raise RuntimeError(f"无法选择车长：{car_length}")
 
     def _select_vehicle_requirement(self, requirement: str) -> None:
-        try:
-            checkbox = self.page.get_by_label(re.compile(re.escape(requirement))).first
-            if checkbox.count():
-                checkbox.check(timeout=1500)
-                return
-        except Exception:
-            pass
+        for option in self._requirement_candidates(requirement):
+            try:
+                checkbox = self.page.get_by_label(re.compile(rf"^{re.escape(option)}$")).first
+                if checkbox.count():
+                    checkbox.check(timeout=1500)
+                    return
+            except Exception:
+                pass
 
-        if self._click_text(requirement, exact=True) or self._click_text(requirement, exact=False):
-            return
+            if self._click_text(option, exact=True) or self._click_text(option, exact=False):
+                return
 
         for label in ("车型要求", "车辆要求", "用车要求"):
             if self._click_text(label, exact=False):
                 time.sleep(0.4)
-                if self._click_text(requirement, exact=True) or self._click_text(requirement, exact=False):
-                    return
+                for option in self._requirement_candidates(requirement):
+                    if self._click_text(option, exact=True) or self._click_text(option, exact=False):
+                        return
         raise RuntimeError(f"无法选择车型要求：{requirement}")
 
     def _set_vehicle_requirements(self, requirements: Iterable[str]) -> None:
@@ -277,13 +390,20 @@ class HuolalaClient:
 
     def _uncheck_vehicle_requirement(self, requirement: str) -> bool:
         try:
-            checkbox = self.page.get_by_label(re.compile(re.escape(requirement))).first
+            checkbox = self.page.get_by_label(re.compile(rf"^{re.escape(requirement)}$")).first
             if checkbox.count() and checkbox.is_visible(timeout=500):
                 checkbox.uncheck(timeout=1000)
                 return True
         except Exception:
             pass
         return False
+
+    def _requirement_candidates(self, requirement: str) -> tuple[str, ...]:
+        aliases = {
+            "平板车": ("平板车", "平板货车"),
+            "高栏车": ("高栏车", "高栏货车"),
+        }
+        return aliases.get(requirement, (requirement,))
 
     def _click_text(self, text: str, exact: bool) -> bool:
         try:
@@ -302,3 +422,35 @@ class HuolalaClient:
         except Exception:
             pass
         time.sleep(0.8)
+
+    def _wait_for_order_form(self) -> None:
+        try:
+            self.page.wait_for_function(
+                """() => {
+                    const text = document.body ? document.body.innerText : '';
+                    return text.includes('货运路线') || text.includes('地址识别');
+                }""",
+                timeout=self.timeout_ms,
+            )
+        except Exception:
+            pass
+
+    def _wait_for_page_value(self, parser, label: str, accept=None) -> float:
+        self._require_page()
+        accept = accept or (lambda value: True)
+        deadline = time.monotonic() + self.timeout_ms / 1000
+        last_error: Exception | None = None
+        last_value: float | None = None
+        while time.monotonic() < deadline:
+            try:
+                body_text = self.page.locator("body").inner_text(timeout=3000)
+                value = parser(body_text)
+                last_value = value
+                if accept(value):
+                    return value
+            except Exception as exc:
+                last_error = exc
+            time.sleep(0.5)
+        if last_value is not None:
+            raise ValueError(f"{label} 已出现但未达到可用状态：{last_value:g}")
+        raise ValueError(f"未找到页面文本中的{label}") from last_error

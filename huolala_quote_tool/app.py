@@ -326,15 +326,7 @@ class HuolalaQuoteApp:
                     self._event("progress", index, len(rows), f"{index}/{len(rows)}")
                     continue
 
-                if process_distance:
-                    try:
-                        distance = client.read_distance()
-                        write_success(distance_cell, numeric_or_original(distance))
-                        self._event("log", f"第 {row_idx} 行：总里程 {distance:g} 公里")
-                    except Exception as exc:
-                        mark_failure(distance_cell, str(exc))
-                        self._event("log", f"第 {row_idx} 行：读取总里程失败：{exc}")
-
+                distance_written = False
                 for column, cell in vehicle_cells:
                     if self.stop_event.is_set():
                         break
@@ -344,9 +336,26 @@ class HuolalaQuoteApp:
                         price = self._quote_vehicle_with_retries(client, column.rule)
                         write_success(cell, numeric_or_original(price))
                         self._event("log", f"第 {row_idx} 行 {column.header}：运费一口价 {price:g} 元")
+                        if process_distance and not distance_written:
+                            distance = client.read_distance()
+                            write_success(distance_cell, numeric_or_original(distance))
+                            distance_written = True
+                            self._event("log", f"第 {row_idx} 行：总里程 {distance:g} 公里")
                     except Exception as exc:
                         mark_failure(cell, str(exc))
                         self._event("log", f"第 {row_idx} 行 {column.header} 报价失败：{exc}")
+
+                if process_distance and not distance_written:
+                    try:
+                        first_rule = detection.vehicle_columns[0].rule
+                        assert first_rule is not None
+                        self._quote_vehicle_with_retries(client, first_rule)
+                        distance = client.read_distance()
+                        write_success(distance_cell, numeric_or_original(distance))
+                        self._event("log", f"第 {row_idx} 行：总里程 {distance:g} 公里")
+                    except Exception as exc:
+                        mark_failure(distance_cell, str(exc))
+                        self._event("log", f"第 {row_idx} 行：读取总里程失败：{exc}")
 
                 wb.save(output_path)
                 self._event("progress", index, len(rows), f"{index}/{len(rows)}")

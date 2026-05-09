@@ -62,7 +62,7 @@ def main() -> None:
     copy_tree(ROOT / "config", portable_dir / "config")
     (portable_dir / "logs").mkdir(exist_ok=True)
 
-    for doc_name in ("README.md", "使用说明.md"):
+    for doc_name in ("README.md", "使用说明.md", "真实测试记录.md"):
         src = ROOT / doc_name
         if src.exists():
             shutil.copy2(src, portable_dir / doc_name)
