@@ -2,7 +2,20 @@
 
 一个 Windows 桌面工具，用于导入任意结构相近的 Excel，自动识别供应商、发货地址、到货地址、距离和可报价车型列，确认后打开货拉拉同城下单页批量查询，并把 `总里程` 与 `运费一口价` 写回新的结果 Excel。
 
-## 运行
+## 普通用户下载运行
+
+到 GitHub Release 页面下载 `auto_input2.0.exe`，放到电脑任意文件夹后双击打开即可，不需要下载 zip，也不需要安装 Python。
+
+第一次运行时，程序会在 `auto_input2.0.exe` 同目录自动生成：
+
+```text
+config\vehicle_rules.csv
+logs\
+```
+
+`vehicle_rules.csv` 是车型规则表，`logs` 里保存每次批量报价日志。
+
+## 开发运行
 
 ```powershell
 python -m pip install -r requirements.txt
@@ -36,6 +49,14 @@ python -m playwright install chromium
 
 并且每完成一行保存一次。
 
+界面下方会持续显示进度日志；同样的内容也会写入 `logs` 目录。日志会记录 Excel 原始发货/到货地址、网页最终参与计价的发货/到货地址、车型切换、`总里程` 写入、`运费一口价` 写入，以及失败原因分析。
+
+任务完成后，界面里的 `结果文件` 区域会显示输出 Excel 路径。点击 `打开结果文件` 可以直接用 Excel 查看报价结果，点击 `打开所在文件夹` 可以定位到结果文件。
+
+地址识别出现多个候选时，程序会按 Excel 里的供应商名称、发货地址、到货地址、道路和门牌号匹配候选项，不再默认选第一项。如果候选地址和 Excel 关键字对不上，该行会标记为地址识别失败并写入失败批注。
+
+地址填写完成后，程序会把网页最终参与计价的发货/到货地址与 Excel 里的两个地址做严格一致性对比。不完全一致时，会在对应地址单元格写入 `货拉拉地址不一致` 批注，并在结果文件新增 `地址不一致汇总` 工作表，方便人工集中修正后重跑。
+
 ## 车型规则表
 
 车型规则维护在：
@@ -53,6 +74,20 @@ config/vehicle_rules.csv
 兼容旧版 `config/vehicle_rules.json`。如果 `vehicle_rules.csv` 存在，程序优先读取 CSV。
 
 ## Windows 免安装打包
+
+生成单个 EXE：
+
+```powershell
+python scripts\build_windows_single_exe.py
+```
+
+生成文件：
+
+```text
+release\auto_input2.0.exe
+```
+
+生成便携文件夹：
 
 ```powershell
 python -m pip install -r requirements.txt

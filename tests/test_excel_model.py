@@ -9,11 +9,15 @@ from pathlib import Path
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font
 
+from huolala_quote_tool.browser import HuolalaClient
 from huolala_quote_tool.excel_model import (
+    cell_has_address_mismatch,
     cell_has_failure,
+    clear_address_mismatch,
     create_output_path,
     detect_workbook,
     load_vehicle_rules,
+    mark_address_mismatch,
     mark_failure,
     should_process_cell,
     write_success,
@@ -130,12 +134,65 @@ class ExcelDetectionTests(unittest.TestCase):
         self.assertTrue(should_process_cell(cell, "failed"))
         self.assertTrue(should_process_cell(cell, "all"))
 
+    def test_address_mismatch_comment_does_not_drive_failed_rerun(self) -> None:
+        wb = Workbook()
+        ws = wb.active
+        cell = ws["A1"]
+
+        mark_address_mismatch(cell, "发货地址不一致；Excel=A；网页参与计价=B")
+
+        self.assertTrue(cell_has_address_mismatch(cell))
+        self.assertFalse(cell_has_failure(cell))
+        self.assertFalse(should_process_cell(cell, "failed"))
+
+        clear_address_mismatch(cell)
+
+        self.assertIsNone(cell.comment)
+
 
 class ParserTests(unittest.TestCase):
     def test_parse_total_distance_and_fixed_price(self) -> None:
         text = "总里程145公里\n运费一口价 1072.64元\n总计 992.64元"
         self.assertEqual(parse_total_distance(text), 145)
         self.assertEqual(parse_fixed_price(text), 1072.64)
+
+
+class AddressCandidateTests(unittest.TestCase):
+    def test_choose_candidate_by_company_and_house_number(self) -> None:
+        client = HuolalaClient()
+        candidates = [
+            {"index": 0, "text": "清流东路与紫薇北路交叉口 安徽省滁州市南谯区"},
+            {"index": 1, "text": "安徽胜华波汽车电器有限公司地面停车场 安徽省滁州市琅琊区清流东路2999号"},
+            {"index": 2, "text": "安徽省滁州市琅琊区清流东路2999号"},
+        ]
+
+        selected = client._choose_address_candidate(
+            candidates,
+            [
+                "安徽胜华波汽车电器有限公司",
+                "安徽胜华波汽车电器有限公司，安徽省滁州市南谯区清流东路2999号",
+            ],
+        )
+
+        self.assertIsNotNone(selected)
+        self.assertEqual(selected["index"], 1)
+
+    def test_rejects_candidates_without_required_number(self) -> None:
+        client = HuolalaClient()
+        candidates = [
+            {"index": 0, "text": "清流东路与紫薇北路交叉口 安徽省滁州市南谯区"},
+            {"index": 1, "text": "清流东路 安徽省滁州市琅琊区"},
+        ]
+
+        selected = client._choose_address_candidate(
+            candidates,
+            [
+                "安徽胜华波汽车电器有限公司",
+                "安徽胜华波汽车电器有限公司，安徽省滁州市南谯区清流东路2999号",
+            ],
+        )
+
+        self.assertIsNone(selected)
 
 
 if __name__ == "__main__":

@@ -13,4 +13,9 @@ dist/
 logs/
 simulation_output/
 real_test_output/
+real_batch_output/
+release/
+github_demo_*/
+full_github_demo_*/
+final_github_demo_*/
 *.spec

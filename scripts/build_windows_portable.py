@@ -54,7 +54,7 @@ def main() -> None:
         "playwright.sync_api",
         "--add-data",
         f"{ROOT / 'config'}{data_sep}config",
-        str(ROOT / "huolala_quote_tool" / "__main__.py"),
+        str(ROOT / "huolala_quote_tool_launcher.py"),
     ]
     subprocess.run(command, cwd=ROOT, check=True)
 

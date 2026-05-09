@@ -14,10 +14,11 @@ from openpyxl.comments import Comment
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
-from .paths import config_dir
+from .paths import config_dir, ensure_config_files
 
 
 FAILURE_PREFIX = "货拉拉报价失败: "
+ADDRESS_MISMATCH_PREFIX = "货拉拉地址不一致: "
 
 ROLE_ALIASES = {
     "supplier": ["供应商名称", "供应商", "承运商", "客户名称", "客户"],
@@ -40,6 +41,7 @@ VEHICLE_HINT_RE = re.compile(
 
 
 def default_rules_path() -> Path:
+    ensure_config_files()
     rule_dir = config_dir()
     csv_path = rule_dir / "vehicle_rules.csv"
     return csv_path if csv_path.exists() else rule_dir / "vehicle_rules.json"
@@ -438,6 +440,10 @@ def cell_has_failure(cell) -> bool:
     return bool(cell.comment and cell.comment.text.startswith(FAILURE_PREFIX))
 
 
+def cell_has_address_mismatch(cell) -> bool:
+    return bool(cell.comment and cell.comment.text.startswith(ADDRESS_MISMATCH_PREFIX))
+
+
 def should_process_cell(cell, strategy: str) -> bool:
     if strategy == "all":
         return True
@@ -451,9 +457,26 @@ def write_success(cell, value: float | int | str) -> None:
     cell.comment = None
 
 
-def mark_failure(cell, message: str) -> None:
+def _clean_comment_message(message: str) -> str:
     clean_message = re.sub(r"\s+", " ", str(message)).strip()
+    if len(clean_message) > 500:
+        clean_message = clean_message[:497] + "..."
+    return clean_message
+
+
+def mark_failure(cell, message: str) -> None:
+    clean_message = _clean_comment_message(message)
     cell.comment = Comment(f"{FAILURE_PREFIX}{clean_message}", "HuolalaQuoteTool")
+
+
+def mark_address_mismatch(cell, message: str) -> None:
+    clean_message = _clean_comment_message(message)
+    cell.comment = Comment(f"{ADDRESS_MISMATCH_PREFIX}{clean_message}", "HuolalaQuoteTool")
+
+
+def clear_address_mismatch(cell) -> None:
+    if cell_has_address_mismatch(cell):
+        cell.comment = None
 
 
 def numeric_or_original(value: float) -> float | int:
