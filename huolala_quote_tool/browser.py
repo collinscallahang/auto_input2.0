@@ -139,7 +139,7 @@ class HuolalaClient:
         self._select_car_length(rule.car_length)
         self._set_vehicle_requirements(rule.vehicle_requirements)
         self._wait_for_quote_refresh()
-        return self._wait_for_page_value(parse_fixed_price, "运费一口价")
+        return self._wait_for_page_value(parse_fixed_price, "运费一口价", require_not_pricing=True)
 
     def _require_page(self) -> None:
         if self.page is None:
@@ -435,7 +435,7 @@ class HuolalaClient:
         except Exception:
             pass
 
-    def _wait_for_page_value(self, parser, label: str, accept=None) -> float:
+    def _wait_for_page_value(self, parser, label: str, accept=None, require_not_pricing: bool = False) -> float:
         self._require_page()
         accept = accept or (lambda value: True)
         deadline = time.monotonic() + self.timeout_ms / 1000
@@ -444,6 +444,9 @@ class HuolalaClient:
         while time.monotonic() < deadline:
             try:
                 body_text = self.page.locator("body").inner_text(timeout=3000)
+                if require_not_pricing and "计价中" in body_text:
+                    time.sleep(0.5)
+                    continue
                 value = parser(body_text)
                 last_value = value
                 if accept(value):
